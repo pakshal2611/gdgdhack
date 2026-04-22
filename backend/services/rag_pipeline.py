@@ -1,31 +1,31 @@
 """
 RAG (Retrieval-Augmented Generation) Pipeline
 - Chunks financial data into text segments
-- Creates embeddings via OpenAI API
-- Stores/retrieves from FAISS vector store
-- Generates LLM responses with retrieved context
+- Creates embeddings locally using TF-IDF (free, no API needed)
+- Retrieves relevant chunks via cosine similarity
+- Generates LLM responses with retrieved context via OpenRouter (free model)
 """
 import os
 import json
 import numpy as np
-
-try:
-    import faiss
-    FAISS_AVAILABLE = True
-except ImportError:
-    FAISS_AVAILABLE = False
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 from openai import OpenAI
 
-# In-memory storage for FAISS indices and chunks per file
-_indices = {}   # file_id -> faiss.IndexFlatL2
-_chunks = {}    # file_id -> list of text chunks
+# In-memory storage for vectorizers, matrices, and chunks per file
+_vectorizers = {}   # file_id -> TfidfVectorizer
+_matrices = {}      # file_id -> TF-IDF sparse matrix
+_chunks = {}        # file_id -> list of text chunks
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY", ""),
+    timeout=60,          # 60-second timeout so it doesn't hang forever
+    max_retries=1,
+)
 
-EMBEDDING_MODEL = "text-embedding-ada-002"
-CHAT_MODEL = "gpt-3.5-turbo"
-EMBEDDING_DIM = 1536  # ada-002 dimension
+CHAT_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b:free")
 
 
 def chunk_data(financial_data, raw_text=""):
@@ -110,57 +110,48 @@ def _split_text(text, max_length=500):
     return chunks
 
 
-def create_embeddings(chunks):
+def create_embeddings(file_id, chunks):
     """
-    Create embeddings for text chunks using OpenAI API.
+    Create TF-IDF embeddings for text chunks (local, free, instant).
 
     Args:
+        file_id: the file ID
         chunks: list of text strings
 
     Returns:
-        numpy array of embeddings (n_chunks x embedding_dim)
+        (TfidfVectorizer, sparse TF-IDF matrix)
     """
-    try:
-        response = client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=chunks
-        )
-        embeddings = [item.embedding for item in response.data]
-        return np.array(embeddings, dtype=np.float32)
-    except Exception as e:
-        print(f"⚠️ Embedding error: {e}")
-        # Return random embeddings as fallback (for when API key is not set)
-        return np.random.rand(len(chunks), EMBEDDING_DIM).astype(np.float32)
+    vectorizer = TfidfVectorizer(stop_words="english", max_features=5000)
+    tfidf_matrix = vectorizer.fit_transform(chunks)
+    return vectorizer, tfidf_matrix
 
 
-def store_embeddings(file_id, chunks, embeddings=None):
+def store_embeddings(file_id, chunks, vectorizer=None, tfidf_matrix=None):
     """
-    Store embeddings in FAISS index.
+    Store TF-IDF vectorizer and matrix in memory.
 
     Args:
         file_id: the file ID
         chunks: list of text chunks
-        embeddings: optional pre-computed embeddings
+        vectorizer: fitted TfidfVectorizer
+        tfidf_matrix: TF-IDF sparse matrix
     """
-    if embeddings is None:
-        embeddings = create_embeddings(chunks)
-
     _chunks[file_id] = chunks
 
-    if FAISS_AVAILABLE:
-        index = faiss.IndexFlatL2(EMBEDDING_DIM)
-        index.add(embeddings)
-        _indices[file_id] = index
+    if vectorizer is not None and tfidf_matrix is not None:
+        _vectorizers[file_id] = vectorizer
+        _matrices[file_id] = tfidf_matrix
     else:
-        # Fallback: store raw embeddings
-        _indices[file_id] = embeddings
+        v, m = create_embeddings(file_id, chunks)
+        _vectorizers[file_id] = v
+        _matrices[file_id] = m
 
-    print(f"✅ Stored {len(chunks)} chunks for file {file_id}")
+    print(f"[OK] Stored {len(chunks)} chunks for file {file_id}")
 
 
 def retrieve_context(file_id, query, top_k=3):
     """
-    Retrieve the most relevant chunks for a query.
+    Retrieve the most relevant chunks for a query using TF-IDF cosine similarity.
 
     Args:
         file_id: the file ID
@@ -175,34 +166,27 @@ def retrieve_context(file_id, query, top_k=3):
 
     chunks = _chunks[file_id]
 
-    # Create query embedding
-    query_embedding = create_embeddings([query])
+    if file_id in _vectorizers and file_id in _matrices:
+        vectorizer = _vectorizers[file_id]
+        tfidf_matrix = _matrices[file_id]
 
-    if FAISS_AVAILABLE and file_id in _indices:
-        index = _indices[file_id]
-        distances, indices_arr = index.search(query_embedding, min(top_k, len(chunks)))
-        results = [chunks[i] for i in indices_arr[0] if i < len(chunks)]
+        # Transform query using the same vectorizer
+        query_vec = vectorizer.transform([query])
+        similarities = cosine_similarity(query_vec, tfidf_matrix).flatten()
+
+        # Get top-k indices
+        top_indices = similarities.argsort()[::-1][:top_k]
+        results = [chunks[i] for i in top_indices if i < len(chunks)]
     else:
-        # Fallback: simple cosine similarity
-        stored = _indices.get(file_id)
-        if stored is not None and isinstance(stored, np.ndarray):
-            # Cosine similarity
-            norms_q = np.linalg.norm(query_embedding, axis=1, keepdims=True)
-            norms_s = np.linalg.norm(stored, axis=1, keepdims=True)
-            norms_q[norms_q == 0] = 1
-            norms_s[norms_s == 0] = 1
-            similarity = np.dot(query_embedding / norms_q, (stored / norms_s).T)
-            top_indices = np.argsort(similarity[0])[::-1][:top_k]
-            results = [chunks[i] for i in top_indices]
-        else:
-            results = chunks[:top_k]
+        # Fallback: return first chunks
+        results = chunks[:top_k]
 
     return results
 
 
 def generate_response(query, context_chunks):
     """
-    Generate an LLM response using retrieved context.
+    Generate an LLM response using retrieved context via OpenRouter (free model).
 
     Args:
         query: user question
@@ -238,12 +222,12 @@ def generate_response(query, context_chunks):
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"AI response error: {str(e)}. Please check your OpenAI API key."
+        return f"AI response error: {str(e)}. Please check your OpenRouter API key."
 
 
 def build_rag_index(file_id, financial_data, raw_text=""):
     """
-    Full RAG pipeline: chunk → embed → store.
+    Full RAG pipeline: chunk → embed (TF-IDF) → store.
 
     Args:
         file_id: the file ID
@@ -251,6 +235,6 @@ def build_rag_index(file_id, financial_data, raw_text=""):
         raw_text: raw extracted text
     """
     chunks = chunk_data(financial_data, raw_text)
-    embeddings = create_embeddings(chunks)
-    store_embeddings(file_id, chunks, embeddings)
+    vectorizer, tfidf_matrix = create_embeddings(file_id, chunks)
+    store_embeddings(file_id, chunks, vectorizer, tfidf_matrix)
     return chunks
