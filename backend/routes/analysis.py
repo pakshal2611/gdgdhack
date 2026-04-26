@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from services.financial_engine import run_full_analysis
 from services.ai_insights import generate_insights
-from database.models import get_file, get_all_files
+from database.models import get_file, get_all_files, get_anomalies
 
 router = APIRouter()
 
@@ -14,7 +14,7 @@ router = APIRouter()
 async def get_analysis(file_id: int):
     """
     Get financial analysis for a specific file.
-    Includes: data, ratios, trend, and AI insights.
+    Includes: data, ratios, trend, AI insights, anomalies, and YoY growth.
     """
     # Verify file exists
     file_record = get_file(file_id)
@@ -28,6 +28,9 @@ async def get_analysis(file_id: int):
         # Generate AI insights
         insights = generate_insights(file_id)
 
+        # Fetch anomalies
+        anomalies = get_anomalies(file_id)
+
         return {
             "file_id": file_id,
             "filename": file_record.get("filename", ""),
@@ -35,6 +38,8 @@ async def get_analysis(file_id: int):
             "ratios": analysis["ratios"],
             "trend": analysis["trend"],
             "insights": insights,
+            "anomalies": anomalies,
+            "yoy_growth": analysis.get("yoy_growth", []),
         }
 
     except Exception as e:

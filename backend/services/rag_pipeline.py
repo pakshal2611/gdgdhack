@@ -184,28 +184,40 @@ def retrieve_context(file_id, query, top_k=3):
     return results
 
 
-def generate_response(query, context_chunks):
+def generate_response(query, context_chunks, eli15_mode=False):
     """
     Generate an LLM response using retrieved context via OpenRouter (free model).
 
     Args:
         query: user question
         context_chunks: list of relevant text chunks
+        eli15_mode: if True, use simplified ELI5 (Explain Like I'm 5) system prompt
 
     Returns:
         string response
     """
     context = "\n\n".join(context_chunks)
 
+    # Select system prompt based on eli15_mode
+    if eli15_mode:
+        system_prompt = (
+            "You are a financial analyst AI. Explain everything in very simple words that a "
+            "15-year-old student could understand. Avoid all financial jargon. When you must "
+            "use a financial term, immediately explain it in brackets in plain English. Use "
+            "short sentences. Be friendly and clear."
+        )
+    else:
+        system_prompt = (
+            "You are a financial analyst AI assistant. Use the provided context to answer "
+            "questions about the company's financial data. Be specific, use numbers from the "
+            "context, and provide clear insights. If the context doesn't contain enough "
+            "information, say so honestly."
+        )
+
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are a financial analyst AI assistant. Use the provided context to answer "
-                "questions about the company's financial data. Be specific, use numbers from the "
-                "context, and provide clear insights. If the context doesn't contain enough "
-                "information, say so honestly."
-            ),
+            "content": system_prompt,
         },
         {
             "role": "user",

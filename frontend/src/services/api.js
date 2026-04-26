@@ -26,8 +26,17 @@ export async function getAnalysis(fileId) {
   return response.data;
 }
 
-export async function sendChat(fileId, query) {
-  const response = await api.post('/chat', { file_id: fileId, query });
+export async function sendChat(fileId, query, eli15Mode = false) {
+  const response = await api.post('/chat', { 
+    file_id: fileId, 
+    query,
+    eli15_mode: eli15Mode
+  });
+  return response.data;
+}
+
+export async function getChatHistory(fileId) {
+  const response = await api.get(`/chat/history/${fileId}`);
   return response.data;
 }
 
@@ -45,6 +54,11 @@ export async function downloadExcel(fileId) {
 
 export async function getFiles() {
   const response = await api.get('/files');
+  return response.data;
+}
+
+export async function loadDemo() {
+  const response = await api.post('/demo');
   return response.data;
 }
 

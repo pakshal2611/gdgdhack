@@ -5,6 +5,8 @@ import ChatPage from './pages/ChatPage';
 import './styles/main.css';
 
 function App() {
+  const lastFileId = localStorage.getItem('lastFileId') || '0';
+  
   return (
     <BrowserRouter>
       <nav className="navbar">
@@ -16,7 +18,7 @@ function App() {
           <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>
             Upload
           </NavLink>
-          <NavLink to="/dashboard/0" className={({ isActive }) => isActive ? 'active' : ''}>
+          <NavLink to={`/dashboard/${lastFileId}`} className={({ isActive }) => isActive ? 'active' : ''}>
             Dashboard
           </NavLink>
           <NavLink to="/chat" className={({ isActive }) => isActive ? 'active' : ''}>

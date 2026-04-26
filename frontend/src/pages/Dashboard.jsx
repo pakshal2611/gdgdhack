@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getAnalysis, downloadExcel } from '../services/api';
 import DataTable from '../components/DataTable';
 import Charts from '../components/Charts';
 import RatioCards from '../components/RatioCards';
+import AnomalyPanel from '../components/AnomalyPanel';
+import YoYTable from '../components/YoYTable';
 
 export default function Dashboard() {
   const { fileId } = useParams();
+  const navigate = useNavigate();
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (fileId) fetchAnalysis();
@@ -29,19 +33,24 @@ export default function Dashboard() {
   };
 
   const handleExport = async () => {
+    setExporting(true);
     try {
       await downloadExcel(fileId);
     } catch (err) {
       alert('Export failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setExporting(false);
     }
   };
 
   if (loading) {
     return (
       <div className="page">
-        <div className="loading-container">
-          <div className="spinner" />
-          <p>Analyzing financial data...</p>
+        <div className="skeleton-grid">
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
         </div>
       </div>
     );
@@ -61,15 +70,43 @@ export default function Dashboard() {
     );
   }
 
+  const filename = analysis?.filename || `File #${fileId}`;
+  const displayName = filename.replace('.pdf', '').replace(/_/g, ' ');
+
   return (
     <div className="page" id="dashboard-page">
+
+      {/* Breadcrumb */}
+      <nav className="breadcrumb fade-in">
+        <span className="breadcrumb-item"><Link to="/">Home</Link></span>
+        <span className="breadcrumb-item">Dashboard</span>
+        <span className="breadcrumb-item">{displayName}</span>
+      </nav>
+
+      {/* Top bar */}
       <div className="dashboard-top-bar fade-in">
         <div className="page-header" style={{ marginBottom: 0 }}>
-          <h1 className="page-title">Financial Dashboard</h1>
-          <p className="page-subtitle">{analysis?.filename || `File #${fileId}`}</p>
+          <h1 className="page-title">📊 {displayName}</h1>
+          <p className="page-subtitle">
+            Financial Intelligence Report
+            <button
+              className="btn btn-ghost"
+              id="refresh-btn"
+              onClick={fetchAnalysis}
+              style={{ marginLeft: '0.75rem', fontSize: '0.85rem', padding: '0.25rem 0.75rem' }}
+              title="Refresh analysis"
+            >
+              🔄 Refresh
+            </button>
+          </p>
         </div>
-        <button className="btn btn-primary" id="export-btn" onClick={handleExport}>
-          📥 Export Excel
+        <button
+          className="btn btn-primary"
+          id="export-btn"
+          onClick={handleExport}
+          disabled={exporting}
+        >
+          {exporting ? '⏳ Generating…' : '📥 Export Excel'}
         </button>
       </div>
 
@@ -78,7 +115,13 @@ export default function Dashboard() {
         <RatioCards ratios={analysis?.ratios} trend={analysis?.trend} />
 
         {/* Charts */}
-        <Charts data={analysis?.data} />
+        <Charts data={analysis?.data} yoyData={analysis?.yoy_growth} />
+
+        {/* YoY Table */}
+        <YoYTable yoyData={analysis?.yoy_growth} />
+
+        {/* Anomaly Panel */}
+        <AnomalyPanel anomalies={analysis?.anomalies} />
 
         {/* Data Table */}
         <div className="card fade-in">
@@ -99,6 +142,16 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Floating Chat Button — only on Dashboard */}
+      <button
+        className="fab-chat"
+        id="fab-chat-btn"
+        onClick={() => navigate(`/chat?file=${fileId}`)}
+        title="Chat with your data"
+      >
+        💬
+      </button>
     </div>
   );
 }

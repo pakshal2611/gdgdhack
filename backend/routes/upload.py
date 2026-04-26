@@ -9,6 +9,7 @@ from services.pdf_extractor import extract_data
 from services.data_cleaner import standardize
 from database.models import insert_file, insert_financial_data_bulk, get_financial_data
 from services.rag_pipeline import build_rag_index
+from services.anomaly_detector import run_anomaly_detection
 from utils.helpers import generate_unique_filename, is_supported_file
 
 router = APIRouter()
@@ -40,10 +41,19 @@ async def upload_file(file: UploadFile = File(...)):
             f.write(content)
 
         # Extract data from file
+        print(f"[Upload] Extracting data from: {file.filename}")
         df, raw_text = extract_data(file_path, file.filename)
+        print(f"[Upload] Extraction result: {len(df)} rows, {len(raw_text)} chars of raw text")
+        if not df.empty:
+            print(f"[Upload] Columns: {list(df.columns)}")
+            print(f"[Upload] First rows:\n{df.head()}")
+        else:
+            print(f"[Upload] WARNING: No structured data extracted!")
+            print(f"[Upload] Raw text preview: {raw_text[:500]}")
 
         # Clean and standardize
         df = standardize(df)
+        print(f"[Upload] After cleaning: {len(df)} rows")
 
         # Store file record in DB
         file_id = insert_file(file.filename)
@@ -53,9 +63,12 @@ async def upload_file(file: UploadFile = File(...)):
             records = df.to_dict(orient="records")
             insert_financial_data_bulk(file_id, records)
 
-        # Build RAG index
+        # Build RAG index (use raw_text even if df is empty — RAG can still answer from text)
         financial_data = get_financial_data(file_id)
         build_rag_index(file_id, financial_data, raw_text)
+
+        # Run anomaly detection
+        anomalies = run_anomaly_detection(file_id, financial_data)
 
         # Clean up uploaded file (optional — keep for reference)
         # os.remove(file_path)
@@ -65,6 +78,8 @@ async def upload_file(file: UploadFile = File(...)):
             "message": "Upload successful",
             "filename": file.filename,
             "rows_extracted": len(df),
+            "raw_text_length": len(raw_text),
+            "anomalies_detected": len(anomalies),
         }
 
     except Exception as e:

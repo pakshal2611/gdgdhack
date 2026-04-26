@@ -13,6 +13,7 @@ from routes.upload import router as upload_router
 from routes.analysis import router as analysis_router
 from routes.chat import router as chat_router
 from routes.export import router as export_router
+from routes.demo import router as demo_router
 
 app = FastAPI(
     title="Financial Intelligence Copilot",
@@ -34,6 +35,7 @@ app.include_router(upload_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
+app.include_router(demo_router, prefix="/api")
 
 
 @app.on_event("startup")

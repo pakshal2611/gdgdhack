@@ -46,6 +46,15 @@ def get_connection():
     return _get_pool().get_connection()
 
 
+def _add_column_if_not_exists(cursor, table, column, definition):
+    """Add a column to a table if it doesn't already exist. Silently ignores if column exists."""
+    try:
+        cursor.execute(f"ALTER TABLE `{table}` ADD COLUMN `{column}` {definition}")
+    except mysql.connector.Error:
+        # Column already exists — ignore
+        pass
+
+
 def init_db():
     """Initialize database tables."""
     conn = get_connection()
@@ -66,9 +75,29 @@ def init_db():
             year VARCHAR(50),
             revenue DECIMAL(20, 2),
             profit DECIMAL(20, 2),
+            expenses DECIMAL(20, 2) DEFAULT 0,
+            ebitda DECIMAL(20, 2) DEFAULT 0,
+            total_assets DECIMAL(20, 2) DEFAULT 0,
+            total_liabilities DECIMAL(20, 2) DEFAULT 0,
+            current_assets DECIMAL(20, 2) DEFAULT 0,
+            current_liabilities DECIMAL(20, 2) DEFAULT 0,
+            cash_flow DECIMAL(20, 2) DEFAULT 0,
             FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
         )
     """)
+
+    # Add new columns to financial_data if the table already existed without them
+    new_financial_cols = {
+        "expenses": "DECIMAL(20,2) DEFAULT 0",
+        "ebitda": "DECIMAL(20,2) DEFAULT 0",
+        "total_assets": "DECIMAL(20,2) DEFAULT 0",
+        "total_liabilities": "DECIMAL(20,2) DEFAULT 0",
+        "current_assets": "DECIMAL(20,2) DEFAULT 0",
+        "current_liabilities": "DECIMAL(20,2) DEFAULT 0",
+        "cash_flow": "DECIMAL(20,2) DEFAULT 0",
+    }
+    for col, defn in new_financial_cols.items():
+        _add_column_if_not_exists(cursor, "financial_data", col, defn)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ratios (
@@ -76,6 +105,48 @@ def init_db():
             file_id INT NOT NULL,
             revenue_growth DECIMAL(10, 2),
             profit_margin DECIMAL(10, 2),
+            ebitda_margin DECIMAL(10, 2) DEFAULT 0,
+            debt_equity DECIMAL(10, 2) DEFAULT 0,
+            current_ratio DECIMAL(10, 2) DEFAULT 0,
+            cagr_5yr DECIMAL(10, 2) DEFAULT 0,
+            avg_profit_margin DECIMAL(10, 2) DEFAULT 0,
+            FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        )
+    """)
+
+    # Add new columns to ratios if the table already existed without them
+    new_ratio_cols = {
+        "ebitda_margin": "DECIMAL(10,2) DEFAULT 0",
+        "debt_equity": "DECIMAL(10,2) DEFAULT 0",
+        "current_ratio": "DECIMAL(10,2) DEFAULT 0",
+        "cagr_5yr": "DECIMAL(10,2) DEFAULT 0",
+        "avg_profit_margin": "DECIMAL(10,2) DEFAULT 0",
+    }
+    for col, defn in new_ratio_cols.items():
+        _add_column_if_not_exists(cursor, "ratios", col, defn)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS anomalies (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            file_id INT NOT NULL,
+            year INT,
+            field VARCHAR(50),
+            value DECIMAL(20, 2),
+            expected_value DECIMAL(20, 2),
+            deviation_pct DECIMAL(10, 2),
+            severity VARCHAR(10) DEFAULT 'medium',
+            description TEXT,
+            FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            file_id INT NOT NULL,
+            role VARCHAR(20),
+            content TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
         )
     """)
